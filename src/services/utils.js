@@ -1,25 +1,17 @@
-// services/utils.js
-
 export function extractJSON(text) {
   try {
     const start = text.indexOf("{");
     let end = text.lastIndexOf("}");
 
-    // 🔥 If closing brace missing → fix it
     if (start !== -1 && end === -1) {
-      end = text.length;
       text = text + "}";
+      end = text.length - 1;
     }
 
-    if (start === -1) {
-      throw new Error("No JSON found");
-    }
+    if (start === -1) throw new Error();
 
-    const jsonString = text.slice(start, end + 1);
-
-    return JSON.parse(jsonString);
-
-  } catch (err) {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
     throw new Error("Invalid JSON");
   }
 }

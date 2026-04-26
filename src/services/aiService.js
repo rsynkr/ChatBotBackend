@@ -1,25 +1,21 @@
-// services/aiService.js
-
 import { extractJSON } from "./utils.js";
+import { isGenericResponse } from "./responseFilter.js";
 
 const OLLAMA_URL = "http://localhost:11434/api/generate";
-
 const ALLOWED_INTENSITY = ["low", "medium", "high"];
 
-// 🔥 Smart emotion mapping + multi-emotion handling
 function mapEmotion(emotion) {
   let e = (emotion || "").toLowerCase().trim();
 
-  // handle multiple emotions like "anxious|sad"
   if (e.includes("|") || e.includes("/") || e.includes(",")) {
     e = e.split(/[\|\/,]/)[0].trim();
   }
 
-  if (["sad", "disappointed", "hopeless", "worthless", "down"].includes(e)) return "sad";
-  if (["stressed", "overwhelmed", "burnout", "pressure"].includes(e)) return "stressed";
-  if (["anxious", "nervous", "worried", "overthinking"].includes(e)) return "anxious";
-  if (["angry", "frustrated", "irritated", "annoyed"].includes(e)) return "angry";
-  if (["happy", "excited", "content", "good"].includes(e)) return "happy";
+  if (["sad","disappointed","hopeless","worthless"].includes(e)) return "sad";
+  if (["stressed","overwhelmed","burnout"].includes(e)) return "stressed";
+  if (["anxious","nervous","worried"].includes(e)) return "anxious";
+  if (["angry","frustrated"].includes(e)) return "angry";
+  if (["happy","excited"].includes(e)) return "happy";
 
   return "neutral";
 }
@@ -28,92 +24,99 @@ function buildPrompt(userInput, memory) {
   return `
 You are a mental health support assistant.
 
-CONTEXT SUMMARY:
-${memory.summary || "None"}
+CONTEXT:
+${memory.summary}
 
-RECENT MESSAGES:
+RECENT:
 ${memory.recent.join("\n")}
 
-Task:
-1. Detect ONE emotion
-2. Detect intensity (low, medium, high)
-3. Give a helpful response
-
 Return ONLY JSON:
-
 {
   "emotion": "ONE of: anxious, sad, angry, stressed, happy, neutral",
-  "intensity": "low, medium, or high",
+  "intensity": "low, medium, high",
   "response": "..."
 }
-
-STRICT RULES:
-- Emotion must be exactly ONE word
-- Do NOT combine emotions
-- Do NOT use symbols like | / ,
-- No explanation
-- No extra text
 
 User: ${userInput}
 `;
 }
 
+async function regenerateResponse(userInput, memory, emotion, intensity) {
+  const prompt = `
+Improve this response.
+
+User: ${userInput}
+Emotion: ${emotion}
+Intensity: ${intensity}
+
+Make it:
+- specific
+- practical
+- non-generic
+
+Return ONLY text.
+`;
+
+  const res = await fetch(OLLAMA_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "llama3", prompt, stream: false })
+  });
+
+  const data = await res.json();
+  return data.response.trim();
+}
+
 export async function generateAIResponse(userInput, memory) {
   try {
-    const prompt = buildPrompt(userInput, memory);
-
     const res = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "llama3",
-        prompt,
+        prompt: buildPrompt(userInput, memory),
         stream: false
       })
     });
 
     const data = await res.json();
-
-    console.log("RAW AI OUTPUT:", data.response);
+    console.log("RAW AI:", data.response);
 
     let parsed;
-
     try {
       parsed = extractJSON(data.response);
     } catch {
-      console.log("⚠️ Invalid structured output → fallback used");
-
-      return {
-        emotion: "neutral",
-        intensity: "low",
-        response: "I'm here for you. Do you want to talk more about what's going on?"
-      };
+      return fallback();
     }
 
     let { emotion, intensity, response } = parsed;
 
-    // 🔥 FIXED: map instead of reject
     emotion = mapEmotion(emotion);
 
-    // normalize intensity
-    intensity = String(intensity || "").toLowerCase().trim();
-    if (!ALLOWED_INTENSITY.includes(intensity)) {
-      intensity = "low";
+    if (!ALLOWED_INTENSITY.includes(intensity)) intensity = "low";
+
+    let finalResponse = response;
+
+    if (isGenericResponse(finalResponse)) {
+      console.log("⚠️ Improving generic response");
+
+      try {
+        const better = await regenerateResponse(userInput, memory, emotion, intensity);
+        if (better.length > 20) finalResponse = better;
+      } catch {}
     }
 
-    return {
-      emotion,
-      intensity,
-      response: String(response || "").trim()
-    };
+    return { emotion, intensity, response: finalResponse };
 
-  } catch (err) {
-    console.error("AI ERROR:", err.message);
-
-    return {
-      emotion: "neutral",
-      intensity: "low",
-      response: "I'm here for you. Do you want to talk more?"
-    };
+  } catch {
+    return fallback();
   }
+}
+
+function fallback() {
+  return {
+    emotion: "neutral",
+    intensity: "low",
+    response: "I'm here for you. Do you want to talk more?"
+  };
 }
