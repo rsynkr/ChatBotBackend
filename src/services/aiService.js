@@ -1,122 +1,96 @@
-import { extractJSON } from "./utils.js";
-import { isGenericResponse } from "./responseFilter.js";
-
 const OLLAMA_URL = "http://localhost:11434/api/generate";
-const ALLOWED_INTENSITY = ["low", "medium", "high"];
 
-function mapEmotion(emotion) {
-  let e = (emotion || "").toLowerCase().trim();
+console.log("🔥 AI SERVICE LOADED");
 
-  if (e.includes("|") || e.includes("/") || e.includes(",")) {
-    e = e.split(/[\|\/,]/)[0].trim();
-  }
-
-  if (["sad","disappointed","hopeless","worthless"].includes(e)) return "sad";
-  if (["stressed","overwhelmed","burnout"].includes(e)) return "stressed";
-  if (["anxious","nervous","worried"].includes(e)) return "anxious";
-  if (["angry","frustrated"].includes(e)) return "angry";
-  if (["happy","excited"].includes(e)) return "happy";
-
-  return "neutral";
+// 🔥 fallback
+function fallback() {
+  return {
+    emotion: "neutral",
+    intensity: "low",
+    response: "I'm here for you. Tell me what's going on."
+  };
 }
 
-function buildPrompt(userInput, memory) {
-  return `
-You are a mental health support assistant.
-
-CONTEXT:
-${memory.summary}
-
-RECENT:
-${memory.recent.join("\n")}
-
-Return ONLY JSON:
-{
-  "emotion": "ONE of: anxious, sad, angry, stressed, happy, neutral",
-  "intensity": "low, medium, high",
-  "response": "..."
-}
-
-User: ${userInput}
-`;
-}
-
-async function regenerateResponse(userInput, memory, emotion, intensity) {
+// 🔥 regenerate (strong)
+async function regenerateResponse(userInput) {
   const prompt = `
-Improve this response.
+User: "${userInput}"
 
-User: ${userInput}
-Emotion: ${emotion}
-Intensity: ${intensity}
+Give a helpful and specific response.
 
-Make it:
-- specific
-- practical
-- non-generic
-
-Return ONLY text.
+Rules:
+- DO NOT say "I hear what you are saying"
+- DO NOT say "let's explore"
+- DO NOT ask generic questions
+- Give one practical suggestion
 `;
 
   const res = await fetch(OLLAMA_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "llama3", prompt, stream: false })
+    body: JSON.stringify({
+      model: "llama3",
+      prompt,
+      stream: false
+    })
   });
 
   const data = await res.json();
-  return data.response.trim();
+  return data.response?.trim();
 }
 
-export async function generateAIResponse(userInput, memory) {
+// 🔥 MAIN FUNCTION
+export async function generateAIResponse(userInput) {
+  console.log("🚀 generateAIResponse CALLED");
+
   try {
     const res = await fetch(OLLAMA_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "llama3",
-        prompt: buildPrompt(userInput, memory),
+        prompt: `User: ${userInput}\nRespond helpfully.`,
         stream: false
       })
     });
 
     const data = await res.json();
-    console.log("RAW AI:", data.response);
 
-    let parsed;
-    try {
-      parsed = extractJSON(data.response);
-    } catch {
-      return fallback();
+    let response = data.response || "";
+    console.log("RAW:", response);
+
+    const lower = response.toLowerCase();
+
+    const isBad =
+      !response ||
+      lower.includes("i hear what you are saying") ||
+      lower.includes("let's explore") ||
+      lower.includes("tell me more") ||
+      response.length < 40;
+
+    // 🔥 FORCE FIX
+    if (isBad) {
+      console.log("🚨 BAD RESPONSE → regenerating");
+
+      const better = await regenerateResponse(userInput);
+
+      if (better && better.length > 20) {
+        response = better;
+        console.log("✅ FIXED:", response);
+      } else {
+        response =
+          "That sounds tough. Try focusing on one small step instead of everything at once.";
+      }
     }
 
-    let { emotion, intensity, response } = parsed;
+    return {
+      emotion: "neutral",
+      intensity: "low",
+      response
+    };
 
-    emotion = mapEmotion(emotion);
-
-    if (!ALLOWED_INTENSITY.includes(intensity)) intensity = "low";
-
-    let finalResponse = response;
-
-    if (isGenericResponse(finalResponse)) {
-      console.log("⚠️ Improving generic response");
-
-      try {
-        const better = await regenerateResponse(userInput, memory, emotion, intensity);
-        if (better.length > 20) finalResponse = better;
-      } catch {}
-    }
-
-    return { emotion, intensity, response: finalResponse };
-
-  } catch {
+  } catch (err) {
+    console.error("AI ERROR:", err);
     return fallback();
   }
-}
-
-function fallback() {
-  return {
-    emotion: "neutral",
-    intensity: "low",
-    response: "I'm here for you. Do you want to talk more?"
-  };
 }

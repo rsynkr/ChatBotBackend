@@ -1,5 +1,4 @@
-// services/crisisService.js
-
+// 🔥 Normalize input
 const normalizeText = (text) => {
   return text
     .toLowerCase()
@@ -8,51 +7,57 @@ const normalizeText = (text) => {
     .trim();
 };
 
+// 🔴 HIGH RISK (intent-based, permissive)
 const HIGH_RISK_PATTERNS = [
-  /kill(ing)?\s*(myself|me)/,
-  /end(ing)?\s*(my\s*)?life/,
+  /kill(ing)?.*(my\s*self|myself|me)/,
+  /end(ing)?.*(life|it|everything)/,
+  /i\s*am\s*ending/,
+  /i\s*am\s*done/,
+  /cant\s*go\s*on/,
   /want\s*to\s*die/,
   /wanna\s*die/,
-  /going\s*to\s*kill\s*myself/,
   /suicide/,
   /\bkys\b/
 ];
 
+// 🟠 MEDIUM
 const MEDIUM_RISK_PATTERNS = [
   /dont\s*want\s*to\s*live/,
   /no\s*reason\s*to\s*live/,
   /life\s*is\s*pointless/,
   /i\s*give\s*up/,
-  /cant\s*take\s*this\s*anymore/
+  /cant\s*take\s*this\s*anymore/,
+  /everything\s*would\s*be\s*better\s*without\s*me/
 ];
 
+// 🟢 LOW
 const LOW_RISK_PATTERNS = [
   /hopeless/,
   /empty/,
   /tired/,
-  /depressed/
+  /depressed/,
+  /worthless/,
+  /overwhelmed/
 ];
 
 function hasSelfReference(text) {
   return /\b(i|me|my|myself)\b/.test(text);
 }
 
+// 🔥 MAIN
 export const detectCrisis = (message) => {
   const text = normalizeText(message);
 
-  // 🔴 HIGH → immediate return
+  // 🔴 HIGH → immediate
   for (const pattern of HIGH_RISK_PATTERNS) {
-    if (pattern.test(text) && hasSelfReference(text)) {
-      return {
-        isCrisis: true,
-        severity: "high",
-        score: 5
-      };
+    if (pattern.test(text)) {
+      return { isCrisis: true, severity: "high", score: 5 };
     }
   }
 
   let score = 0;
 
+  // 🟠 MEDIUM
   for (const pattern of MEDIUM_RISK_PATTERNS) {
     if (pattern.test(text) && hasSelfReference(text)) {
       score += 3;
@@ -60,6 +65,7 @@ export const detectCrisis = (message) => {
     }
   }
 
+  // 🟢 LOW
   for (const pattern of LOW_RISK_PATTERNS) {
     if (pattern.test(text)) {
       score += 1;
@@ -70,21 +76,14 @@ export const detectCrisis = (message) => {
   let severity = "none";
   let isCrisis = false;
 
-  if (score >= 3) {
-    severity = "medium";
-  } else if (score >= 1) {
-    severity = "low";
-  }
+  if (score >= 3) severity = "medium";
+  else if (score >= 1) severity = "low";
 
-  return {
-    isCrisis,
-    severity,
-    score
-  };
+  return { isCrisis, severity, score };
 };
 
-// 🔥 UPDATED RESPONSE LOGIC
-export const getCrisisResponse = (severity = "medium") => {
+// 🔥 RESPONSE
+export const getCrisisResponse = (severity = "high") => {
   if (severity === "high") {
     return `I'm really sorry you're feeling this way. You are not alone.
 
@@ -99,10 +98,10 @@ If possible, please contact someone you trust right now.`;
   if (severity === "medium") {
     return `I'm really sorry you're feeling this way. It sounds like things have been really heavy for you.
 
-You don’t have to go through this alone. Talking to someone you trust or a mental health professional could really help.
+You don’t have to go through this alone. Talking to someone you trust could really help.
 
 📞 AASRA Helpline: +91-9820466726`;
   }
 
-  return `I'm sorry you're feeling this way. It might help to talk to someone you trust or take a small step to care for yourself.`;
+  return `I'm here for you. You don’t have to handle this alone.`;
 };

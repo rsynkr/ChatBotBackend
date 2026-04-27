@@ -1,59 +1,66 @@
-import { detectCrisis, getCrisisResponse } from '../services/crisisService.js';
-import { detectCrisisLLM } from '../services/llmCrisisService.js';
-import { generateAIResponse } from '../services/aiService.js';
-import { getRecommendation } from '../services/recommendationService.js';
+import { generateAIResponse } from "../services/aiService.js";
+import { detectCrisis, getCrisisResponse } from "../services/crisisService.js";
 
-import {
-  getMemory,
-  addMessage,
-  updateSummary,
-  shouldSummarize
-} from '../services/memoryService.js';
-
-import { summarizeConversation } from '../services/summaryService.js';
-
+// 🔥 HANDLE CHAT
 export async function handleChat(req, res) {
-  const { message, userId = "default" } = req.body;
+  try {
+    const { message, userId = "default" } = req.body;
 
-  // Rule-based
-  const rule = detectCrisis(message);
-  if (rule.isCrisis) {
+    console.log("📩 MESSAGE:", message);
+
+    if (!message || typeof message !== "string") {
+      return res.status(400).json({ error: "Valid message is required" });
+    }
+
+    // 🚨 STEP 1: CRISIS CHECK
+    const crisis = detectCrisis(message);
+
+    if (crisis.isCrisis) {
+      return res.json({
+        type: "crisis",
+        severity: crisis.severity,
+        response: getCrisisResponse(crisis.severity)
+      });
+    }
+
+    // 🤖 STEP 2: AI RESPONSE
+    const ai = await generateAIResponse(message);
+
     return res.json({
-      type: "crisis",
-      severity: rule.severity,
-      response: getCrisisResponse(rule.severity)
+      type: "normal",
+      emotion: {
+        emotion: ai.emotion,
+        intensity: ai.intensity
+      },
+      response: ai.response
     });
-  }
 
-  // LLM-based (only HIGH triggers)
-  const llm = await detectCrisisLLM(message);
-  if (llm.severity === "high") {
+  } catch (err) {
+    console.error("❌ Chat error:", err);
+    res.status(500).json({ error: "Server error" });
+  }
+}
+
+
+// 🔥 END CHAT (SIMPLE VERSION)
+export async function endChat(req, res) {
+  try {
+    const { userId = "default" } = req.body;
+
+    console.log("🛑 Ending chat for:", userId);
+
     return res.json({
-      type: "crisis",
-      severity: "high",
-      response: getCrisisResponse("high")
+      type: "session_end",
+      therapy: {
+        support_level: "low",
+        therapy_suggestion: false,
+        reason: "Session ended successfully."
+      },
+      summary: ""
     });
+
+  } catch (err) {
+    console.error("❌ EndChat error:", err);
+    res.status(500).json({ error: "Failed to end chat" });
   }
-
-  const memory = await getMemory(userId);
-
-  const ai = await generateAIResponse(message, memory);
-
-  await addMessage(userId, "User", message);
-  await addMessage(userId, "Assistant", ai.response);
-
-  if (shouldSummarize(userId)) {
-    const updated = await getMemory(userId);
-    const summary = await summarizeConversation(updated.recent, updated.summary);
-    await updateSummary(userId, summary);
-  }
-
-  const recommendation = getRecommendation(ai.emotion, ai.intensity);
-
-  res.json({
-    type: "normal",
-    emotion: ai,
-    response: ai.response,
-    recommendation
-  });
 }
